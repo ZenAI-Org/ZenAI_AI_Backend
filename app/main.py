@@ -13,8 +13,63 @@ from app.integrations.notion_integration import NotionIntegration
 from datetime import datetime
 from app.services.email_service import EmailService 
 from typing import List, Optional 
+from app.middleware.error_middleware import ErrorHandlingMiddleware, RequestLoggingMiddleware
+from app.middleware.request_metrics import RequestMetricsMiddleware
+from app.middleware.auth_middleware import AuthenticationMiddleware, AuthorizationMiddleware
+from app.core.logger import get_logger
+from app.api.routes import router as ai_workflows_router
+
+# Socket.io imports
+try:
+    import socketio
+    from fastapi_socketio import SocketManager
+    SOCKETIO_AVAILABLE = True
+except ImportError:
+    SOCKETIO_AVAILABLE = False
+    logger_init = get_logger(__name__)
+    logger_init.warning("Socket.io not available, real-time updates disabled")
 
 app = FastAPI(title="AI Project Manager Agent", version="1.0.0")
+
+# Initialize Socket.io if available
+if SOCKETIO_AVAILABLE:
+    from app.queue.socketio_manager import get_socketio_manager
+    from app.queue.socketio_handlers import get_socketio_handlers
+    from app.queue.job_listeners import get_job_event_listener
+    
+    # Create Socket.io server
+    sio = socketio.AsyncServer(
+        async_mode="asgi",
+        cors_allowed_origins="*",
+        ping_timeout=60,
+        ping_interval=25,
+    )
+    
+    # Wrap FastAPI app with Socket.io ASGI app
+    app = socketio.ASGIApp(sio, app)
+    
+    # Initialize Socket.io manager and handlers
+    socketio_manager = get_socketio_manager()
+    socketio_manager.set_socketio_server(sio)
+    
+    socketio_handlers = get_socketio_handlers()
+    socketio_handlers.set_socketio_server(sio)
+    
+    # Register Socket.io listeners with job event listener
+    job_event_listener = get_job_event_listener()
+    socketio_manager.register_job_listeners(job_event_listener)
+
+# Add middleware (order matters - auth should be before error handling)
+app.add_middleware(AuthorizationMiddleware)
+app.add_middleware(AuthenticationMiddleware)
+app.add_middleware(RequestMetricsMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(ErrorHandlingMiddleware)
+
+# Include AI workflows router
+app.include_router(ai_workflows_router)
+
+logger = get_logger(__name__)
 
 # Request model
 class MeetingRequest(BaseModel):
@@ -797,6 +852,43 @@ async def send_at_risk_reminders_email():
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+@app.get("/api/projects/{project_id}/suggestions")
+async def get_project_suggestions(project_id: str, force_refresh: bool = False):
+    """
+    Get AI-powered suggestions for a project dashboard.
+    
+    Args:
+        project_id: Project ID
+        force_refresh: Force refresh suggestions even if cached
+        
+    Returns:
+        Dashboard suggestions grouped by card type
+    """
+    try:
+        from app.agents.suggestions_agent import SuggestionsAgent
+        from app.agents.base_agent import AgentConfig
+        
+        config = AgentConfig(model_name="gpt-4", temperature=0.1)
+        agent = SuggestionsAgent(config, db_connection=None)
+        
+        result = await agent.execute(
+            project_id=project_id,
+            force_refresh=force_refresh
+        )
+        
+        if result.status.value == "error":
+            raise HTTPException(status_code=500, detail=result.error)
+        
+        return {
+            "success": True,
+            "data": result.data,
+            "metadata": result.metadata
+        }
+    
+    except Exception as e:
+        print(f"[ERROR] Failed to generate suggestions: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate suggestions: {str(e)}")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8080)
