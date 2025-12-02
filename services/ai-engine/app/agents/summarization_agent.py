@@ -140,6 +140,7 @@ Ensure the summary is:
             )
             
             # Validate inputs
+            if not transcript or len(transcript.strip()) < 10:
                 return self._create_error_result(
                     "Transcript is empty or too short for summarization"
                 )
