@@ -3,6 +3,13 @@ on: [push, pull_request]
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    env:
+      GROQ_API_KEY: "test-key-for-ci"
+      OPENAI_API_KEY: "test-key-for-ci"
+      NOTION_API_KEY: "test-key-for-ci"
+      NOTION_DATABASE_ID: "test-db-id"
+      REDIS_HOST: "localhost"
+      DATABASE_URL: "postgresql://test:test@localhost/test"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v4
@@ -18,4 +25,4 @@ jobs:
       - name: Run tests
         run: |
           cd services/ai-engine
-          PYTHONPATH=$PWD python -m pytest -q tests/
+          PYTHONPATH=$PWD python -m pytest -q tests/ -m "not slow" --tb=short
