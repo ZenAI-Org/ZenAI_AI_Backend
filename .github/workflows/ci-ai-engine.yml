@@ -8,8 +8,14 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: "3.11"
-      - run: docker build -t zenai/ai-engine:ci ./services/ai-engine
-      - run: pip install -r services/ai-engine/requirements.txt
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r services/ai-engine/requirements.txt
+          pip install pytest pytest-asyncio
+      - name: Build Docker image
+        run: docker build -t zenai/ai-engine:ci ./services/ai-engine
       - name: Run tests
-        working-directory: ./services/ai-engine
-        run: PYTHONPATH=. pytest -q tests/
+        run: |
+          cd services/ai-engine
+          PYTHONPATH=$PWD python -m pytest -q tests/
