@@ -1,0 +1,11 @@
+{
+    "response": "Based on the last meeting, the key decisions were:\n1. Migrate to microservices architecture by Q2\n2. Implement Redis caching for performance optimization\n3. Schedule weekly sprint reviews every Friday",
+    "conversation_id": "conv_001",
+    "sources": [
+        {
+            "type": "summary",
+            "meeting_id": "meeting_123",
+            "relevance": 0.92
+        }
+    ]
+}
