@@ -10,4 +10,6 @@ jobs:
           python-version: "3.11"
       - run: docker build -t zenai/ai-engine:ci ./services/ai-engine
       - run: pip install -r services/ai-engine/requirements.txt
-      - run: pytest -q services/ai-engine/tests
+      - name: Run tests
+        working-directory: ./services/ai-engine
+        run: PYTHONPATH=. pytest -q tests/
