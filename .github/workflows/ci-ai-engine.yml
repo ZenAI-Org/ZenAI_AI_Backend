@@ -1,0 +1,13 @@
+name: CI - AI Engine
+on: [push, pull_request]
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - run: docker build -t zenai/ai-engine:ci ./services/ai-engine
+      - run: pip install -r services/ai-engine/requirements.txt
+      - run: pytest -q services/ai-engine/tests

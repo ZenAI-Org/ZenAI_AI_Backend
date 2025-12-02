@@ -172,6 +172,15 @@ async def root():
         "audio_status": "enabled" if audio_processor else "disabled",
         "notion_status": "connected" if notion_integration else "disabled",
         "email_status" : "enabled" if email_service else "disabled"
+    }
+
+@app.get("/api/v1/ai/healthz")
+async def health_check():
+    """Health check endpoint for production monitoring"""
+    return {
+        "status": "ok",
+        "service": "ai-engine",
+        "version": "1.0.0"
     } 
 @app.get("/test-notion") 
 async def test_notion():

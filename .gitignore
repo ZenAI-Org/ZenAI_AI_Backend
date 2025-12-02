@@ -37,3 +37,9 @@ coverage.xml
 
 # Docker
 docker-compose.override.yml
+
+# Project specific
+.kiro/
+
+# This folder will be moved to the canonical repo in the future 
+services/
