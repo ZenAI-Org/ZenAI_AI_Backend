@@ -1,0 +1,11 @@
+openapi: "3.1.0"
+info:
+  title: ZenAI - AI Engine
+  version: "0.1.0"
+paths:
+  /api/v1/ai/healthz:
+    get:
+      summary: Healthcheck
+      responses:
+        200:
+          description: OK
