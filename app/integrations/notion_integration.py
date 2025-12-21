@@ -264,6 +264,8 @@ class NotionIntegration:
                     "assignee_name" : assignee_name, 
                     "assignee_email" : assignee_email, 
                     "due_date" : due_date, 
+                    "last_edited_time": task.get("last_edited_time"),
+                    "created_time": task.get("created_time"),
                     "url": task.get("url") 
                 })
                 
