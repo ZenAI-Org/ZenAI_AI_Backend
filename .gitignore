@@ -42,4 +42,3 @@ docker-compose.override.yml
 .kiro/
 
 # This folder will be moved to the canonical repo in the future 
-services/
