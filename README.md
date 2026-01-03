@@ -24,7 +24,7 @@ An intelligent AI-powered project management system that analyzes meetings, extr
 ### 1. Clone the Repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/ZenAI-Org/ZenAI_AI_Backend
 cd ZenAI
 ```
 
