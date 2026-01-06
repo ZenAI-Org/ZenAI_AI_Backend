@@ -1,12 +1,18 @@
 """
 LangChain framework initialization and configuration.
-Handles OpenAI API setup, model initialization, and common utilities.
+Handles OpenAI, Groq, and Google Gemini API setup, model initialization, and common utilities.
 """
 
 import os
 import logging
-from typing import Optional
+from typing import Optional, Union, Any
 from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
+try:
+    from langchain_google_genai import ChatGoogleGenerativeAI
+except ImportError:
+    ChatGoogleGenerativeAI = None
+
 from langchain.prompts import PromptTemplate
 from langchain.schema import HumanMessage, SystemMessage
 
@@ -17,50 +23,73 @@ class LangChainConfig:
     """Configuration for LangChain framework."""
     
     # Default model configuration
-    DEFAULT_MODEL = "gpt-4"
+    DEFAULT_PROVIDER = "openai"  # "openai", "groq", or "gemini"
+    DEFAULT_MODEL_OPENAI = "gpt-4"
+    DEFAULT_MODEL_GROQ = "llama-3.3-70b-versatile"
+    DEFAULT_MODEL_GEMINI = "gemini-1.5-pro-latest"
     DEFAULT_TEMPERATURE = 0.1
     DEFAULT_MAX_TOKENS = 2048
     DEFAULT_TIMEOUT = 300
     
     @staticmethod
-    def validate_openai_api_key() -> str:
+    def get_provider() -> str:
         """
-        Validate and retrieve OpenAI API key from environment.
-        
-        Returns:
-            OpenAI API key
+        Get configured LLM provider.
+        Priority:
+        1. LLM_PROVIDER env var
+        2. "groq" if GROQ_API_KEY is set and no others
+        3. "gemini" if GOOGLE_API_KEY is set and no others
+        4. "openai" (default)
+        """
+        provider = os.getenv("LLM_PROVIDER")
+        if provider:
+            return provider.lower()
             
-        Raises:
-            ValueError: If API key is not configured
+        # Auto-detection logic (simple)
+        if os.getenv("GROQ_API_KEY") and not os.getenv("OPENAI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
+            return "groq"
+        if os.getenv("GOOGLE_API_KEY") and not os.getenv("OPENAI_API_KEY"):
+            return "gemini"
+            
+        return LangChainConfig.DEFAULT_PROVIDER
+
+    @staticmethod
+    def validate_api_key(provider: str) -> str:
         """
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError(
-                "OPENAI_API_KEY environment variable is not set. "
-                "Please configure your OpenAI API key."
-            )
-        return api_key
+        Validate and retrieve API key for the specified provider.
+        """
+        if provider == "openai":
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                raise ValueError("OPENAI_API_KEY environment variable is not set.")
+            return api_key
+        elif provider == "groq":
+            api_key = os.getenv("GROQ_API_KEY")
+            if not api_key:
+                raise ValueError("GROQ_API_KEY environment variable is not set.")
+            return api_key
+        elif provider == "gemini":
+            api_key = os.getenv("GOOGLE_API_KEY")
+            if not api_key:
+                raise ValueError("GOOGLE_API_KEY environment variable is not set.")
+            return api_key
+        else:
+            raise ValueError(f"Unknown provider: {provider}")
     
     @staticmethod
-    def get_model_name() -> str:
-        """
-        Get configured model name from environment or use default.
-        
-        Returns:
-            Model name to use
-        """
-        return os.getenv("OPENAI_MODEL_NAME", LangChainConfig.DEFAULT_MODEL)
+    def get_model_name(provider: str) -> str:
+        """Get configured model name based on provider."""
+        if provider == "groq":
+            return os.getenv("GROQ_MODEL_NAME", LangChainConfig.DEFAULT_MODEL_GROQ)
+        elif provider == "gemini":
+            return os.getenv("GEMINI_MODEL_NAME", LangChainConfig.DEFAULT_MODEL_GEMINI)
+        return os.getenv("OPENAI_MODEL_NAME", LangChainConfig.DEFAULT_MODEL_OPENAI)
     
     @staticmethod
     def get_temperature() -> float:
-        """
-        Get configured temperature from environment or use default.
-        
-        Returns:
-            Temperature value
-        """
+        """Get configured temperature from environment or use default."""
         try:
-            temp = float(os.getenv("OPENAI_TEMPERATURE", LangChainConfig.DEFAULT_TEMPERATURE))
+            temp = float(os.getenv("LLM_TEMPERATURE", str(LangChainConfig.DEFAULT_TEMPERATURE)))
             if not 0.0 <= temp <= 2.0:
                 logger.warning(f"Temperature {temp} out of range, using default")
                 return LangChainConfig.DEFAULT_TEMPERATURE
@@ -71,14 +100,9 @@ class LangChainConfig:
     
     @staticmethod
     def get_max_tokens() -> Optional[int]:
-        """
-        Get configured max tokens from environment or use default.
-        
-        Returns:
-            Max tokens value or None
-        """
+        """Get configured max tokens from environment or use default."""
         try:
-            max_tokens = os.getenv("OPENAI_MAX_TOKENS")
+            max_tokens = os.getenv("LLM_MAX_TOKENS")
             if max_tokens:
                 return int(max_tokens)
         except ValueError:
@@ -87,14 +111,9 @@ class LangChainConfig:
     
     @staticmethod
     def get_timeout() -> int:
-        """
-        Get configured timeout from environment or use default.
-        
-        Returns:
-            Timeout in seconds
-        """
+        """Get configured timeout from environment or use default."""
         try:
-            timeout = int(os.getenv("OPENAI_TIMEOUT", LangChainConfig.DEFAULT_TIMEOUT))
+            timeout = int(os.getenv("LLM_TIMEOUT", str(LangChainConfig.DEFAULT_TIMEOUT)))
             if timeout <= 0:
                 logger.warning("Timeout must be positive, using default")
                 return LangChainConfig.DEFAULT_TIMEOUT
@@ -107,47 +126,63 @@ class LangChainConfig:
 class LangChainInitializer:
     """Initializes and manages LangChain components."""
     
-    _llm_instance: Optional[ChatOpenAI] = None
+    _llm_instance: Optional[Union[ChatOpenAI, ChatGroq, Any]] = None
     _initialized: bool = False
     
     @classmethod
-    def initialize(cls) -> ChatOpenAI:
+    def initialize(cls) -> Union[ChatOpenAI, ChatGroq, Any]:
         """
-        Initialize LangChain with OpenAI API.
-        
-        Returns:
-            Initialized ChatOpenAI instance
-            
-        Raises:
-            ValueError: If OpenAI API key is not configured
+        Initialize LangChain with configured provider.
         """
         if cls._initialized and cls._llm_instance:
             logger.info("LangChain already initialized, returning existing instance")
             return cls._llm_instance
         
         try:
+            # Determine provider
+            provider = LangChainConfig.get_provider()
+            logger.info(f"Initializing LangChain with provider: {provider}")
+            
             # Validate API key
-            api_key = LangChainConfig.validate_openai_api_key()
+            api_key = LangChainConfig.validate_api_key(provider)
             
             # Get configuration
-            model_name = LangChainConfig.get_model_name()
+            model_name = LangChainConfig.get_model_name(provider)
             temperature = LangChainConfig.get_temperature()
             max_tokens = LangChainConfig.get_max_tokens()
             timeout = LangChainConfig.get_timeout()
             
-            logger.info(f"Initializing LangChain with model: {model_name}")
-            
-            # Initialize ChatOpenAI
-            cls._llm_instance = ChatOpenAI(
-                model_name=model_name,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                timeout=timeout,
-                api_key=api_key,
-            )
+            if provider == "groq":
+                cls._llm_instance = ChatGroq(
+                    groq_api_key=api_key,
+                    model_name=model_name,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                )
+            elif provider == "gemini":
+                if ChatGoogleGenerativeAI is None:
+                    raise ImportError("langchain-google-genai package not installed. Run 'pip install langchain-google-genai'")
+                    
+                cls._llm_instance = ChatGoogleGenerativeAI(
+                    google_api_key=api_key,
+                    model=model_name,
+                    temperature=temperature,
+                    max_output_tokens=max_tokens,
+                    timeout=timeout,
+                    convert_system_message_to_human=True # Gemini sometimes prefers this
+                )
+            else:
+                cls._llm_instance = ChatOpenAI(
+                    api_key=api_key,
+                    model_name=model_name,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                )
             
             cls._initialized = True
-            logger.info("LangChain successfully initialized")
+            logger.info(f"LangChain successfully initialized with {model_name}")
             
             return cls._llm_instance
         
@@ -156,26 +191,17 @@ class LangChainInitializer:
             raise
     
     @classmethod
-    def get_llm(cls) -> ChatOpenAI:
-        """
-        Get the initialized LLM instance.
-        
-        Returns:
-            ChatOpenAI instance
-            
-        Raises:
-            RuntimeError: If LangChain has not been initialized
-        """
+    def get_llm(cls) -> Union[ChatOpenAI, ChatGroq, Any]:
+        """Get the initialized LLM instance."""
         if not cls._initialized or not cls._llm_instance:
-            raise RuntimeError(
-                "LangChain has not been initialized. "
-                "Call LangChainInitializer.initialize() first."
-            )
+            # Auto-initialize if not ready
+            return cls.initialize()
         return cls._llm_instance
+
     
     @classmethod
     def reset(cls) -> None:
-        """Reset the LangChain instance (useful for testing)."""
+        """Reset the LangChain instance."""
         cls._llm_instance = None
         cls._initialized = False
         logger.info("LangChain instance reset")
@@ -190,17 +216,6 @@ class PromptTemplateManager:
         input_variables: list,
         description: Optional[str] = None,
     ) -> PromptTemplate:
-        """
-        Create a LangChain prompt template.
-        
-        Args:
-            template: Template string with {variable} placeholders
-            input_variables: List of variable names
-            description: Optional template description
-            
-        Returns:
-            PromptTemplate instance
-        """
         return PromptTemplate(
             template=template,
             input_variables=input_variables,
@@ -209,16 +224,6 @@ class PromptTemplateManager:
     
     @staticmethod
     def format_prompt(template: PromptTemplate, **kwargs) -> str:
-        """
-        Format a prompt template with values.
-        
-        Args:
-            template: PromptTemplate instance
-            **kwargs: Values for template variables
-            
-        Returns:
-            Formatted prompt string
-        """
         return template.format(**kwargs)
 
 
@@ -227,28 +232,10 @@ class MessageBuilder:
     
     @staticmethod
     def create_system_message(content: str) -> SystemMessage:
-        """
-        Create a system message.
-        
-        Args:
-            content: Message content
-            
-        Returns:
-            SystemMessage instance
-        """
         return SystemMessage(content=content)
     
     @staticmethod
     def create_human_message(content: str) -> HumanMessage:
-        """
-        Create a human message.
-        
-        Args:
-            content: Message content
-            
-        Returns:
-            HumanMessage instance
-        """
         return HumanMessage(content=content)
     
     @staticmethod
@@ -256,16 +243,6 @@ class MessageBuilder:
         system_prompt: Optional[str] = None,
         user_message: str = "",
     ) -> list:
-        """
-        Create a list of messages for LLM invocation.
-        
-        Args:
-            system_prompt: Optional system prompt
-            user_message: User message content
-            
-        Returns:
-            List of message objects
-        """
         messages = []
         if system_prompt:
             messages.append(MessageBuilder.create_system_message(system_prompt))

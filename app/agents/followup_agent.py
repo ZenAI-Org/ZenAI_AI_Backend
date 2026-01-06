@@ -4,6 +4,9 @@ import asyncio
 
 from app.agents.base_agent import BaseAgent, AgentConfig, AgentResult
 from app.integrations.notion_integration import NotionIntegration
+from app.integrations.slack_integration import SlackIntegration
+from app.integrations.teams_integration import TeamsIntegration
+from app.integrations.jira_integration import JiraIntegration
 from app.services.email_service import EmailService
 from app.core.logger import get_logger
 from app.models.followup import FollowUpReport, InactiveTask, TaskContext
@@ -19,7 +22,7 @@ logger = get_logger(__name__)
 class FollowUpAgent(BaseAgent):
     """
     Agent responsible for monitoring project tasks, checking for inactivity,
-    analyzing context for stalled tasks, and sending automated nudges.
+    analyzing context for stalled tasks, and sending automated nudges via Email, Slack, or Teams.
     """
     
     def __init__(self, config: AgentConfig = None, db_connection=None):
@@ -31,6 +34,10 @@ class FollowUpAgent(BaseAgent):
         
         self.notion = NotionIntegration()
         self.email_service = EmailService()
+        self.slack = SlackIntegration()
+        self.teams = TeamsIntegration()
+        self.jira = JiraIntegration()
+        
         self.db_connection = db_connection
         self.context_retriever = ContextRetriever(db_connection) if (ContextRetriever and db_connection) else None
         
@@ -57,8 +64,9 @@ class FollowUpAgent(BaseAgent):
         Orchestrate the daily follow-up process:
         1. Detect inactive tasks
         2. Analyze context
-        3. Send nudges
+        3. Send nudges (Email, Slack, Teams)
         4. Generate report
+        5. Sync blockers to Jira (optional)
         """
         # Track metrics for report
         total_tasks_checked = 0
@@ -98,10 +106,20 @@ class FollowUpAgent(BaseAgent):
                 detected_inactive.append(inactive_model)
                 
                 # Send nudge if appropriate
-                if task.get('assignee_email'):
-                    sent = await self.send_nudge(task, context_dict)
-                    if sent:
-                        nudges_sent += 1
+                sent = await self.send_nudge(task, context_dict)
+                if sent:
+                    nudges_sent += 1
+                
+                # Advanced: If blocked, create Jira issue
+                if context_dict.get("is_blocked") and self.jira.is_configured:
+                    jira_key = self.jira.create_issue(
+                        summary=f"Blocker: {task.get('title')}",
+                        description=f"Task is blocked. Context: {context_dict.get('notes')}",
+                        priority="High"
+                    )
+                    if jira_key:
+                        logger.info(f"Created Jira issue {jira_key} for blocked task")
+
             
             # 4. Generate Report object
             report = FollowUpReport(
@@ -112,7 +130,7 @@ class FollowUpAgent(BaseAgent):
                 inactive_task_details=detected_inactive
             )
             
-            # Email report
+            # Email report to Admin
             admin_email = self.email_service.from_email 
             if admin_email:
                 report_md = self.generate_report_markdown_from_model(report)
@@ -128,10 +146,6 @@ class FollowUpAgent(BaseAgent):
             logger.error(f"FollowUpAgent run failed: {e}")
             return AgentResult(status="error", error=str(e))
             
-        except Exception as e:
-            logger.error(f"FollowUpAgent run failed: {e}")
-            return AgentResult(status="error", error=str(e))
-
     def detect_inactive_tasks(self, tasks: List[Dict]) -> List[Dict]:
         """
         Identify tasks that haven't been edited in X days and are not 'Done'.
@@ -149,7 +163,6 @@ class FollowUpAgent(BaseAgent):
                 continue
                 
             # Time format from Notion: 2023-10-25T12:00:00.000Z
-            # Clean up Z for simpler parsing if needed, or usage isoformat
             try:
                 last_edited_str = last_edited_str.replace("Z", "+00:00")
                 last_edited = datetime.fromisoformat(last_edited_str)
@@ -200,50 +213,60 @@ class FollowUpAgent(BaseAgent):
 
     async def send_nudge(self, task: Dict, context: Dict) -> bool:
         """
-        Send an email nudge. Content depends on whether task seems blocked.
+        Send a nudge via available channels (Slack, Teams, Email).
         """
         assignee = task.get("assignee_name", "Team Member")
         email = task.get("assignee_email")
         title = task.get("title")
         days = task.get("days_inactive")
         
-        if not email:
-            return False
-            
+        sent_any = False
+        
+        # Construct message content
         if context.get("is_blocked"):
-            # Send "Need Help?" email
             subject = f"Check-in: Blockers on '{title}'?"
             body_text = (
                 f"Hi {assignee},\n\n"
                 f"I noticed '{title}' hasn't been updated in {days} days.\n"
                 f"Recent meetings mentioned potential blockers: {context.get('notes')}\n\n"
-                f"Do you need any support to move this forward?\n\n"
-                f"ZenAI Project Manager"
+                f"Do you need any support to move this forward?"
             )
-            # In a real app we'd use a nice HTML template similar to EmailService types
-            # Here we reuse simple text or call a specific EmailService method if we added one.
-            # actually let's use the generic send_email for now.
-            return await asyncio.to_thread(
-                self.email_service.send_email,
-                [email],
-                subject,
-                body_text
-            )
+            slack_text = f"🔴 *Blocked Task Check-in*: <{task.get('url')}|{title}>\nAssignee: {assignee}\nBlockers mentioned: {context.get('notes')}"
+            teams_color = "d9534f" # Red
         else:
-            # Send standard nudge
             subject = f"Update reminder: '{title}'"
             body_text = (
                 f"Hi {assignee},\n\n"
                 f"Just a friendly nudge! '{title}' hasn't been updated in {days} days.\n"
-                f"Please update the status or let us know if you're stuck.\n\n"
-                f"ZenAI Project Manager"
+                f"Please update the status or let us know if you're stuck."
             )
-            return await asyncio.to_thread(
+            slack_text = f"⚠️ *Task Inactive*: <{task.get('url')}|{title}>\nAssignee: {assignee}\nInactive for {days} days."
+            teams_color = "f0ad4e" # Orange
+
+        # 1. Send via Slack (if configured)
+        if self.slack.webhook_url or self.slack.bot_token:
+            slack_sent = self.slack.send_notification(slack_text)
+            if slack_sent:
+                sent_any = True
+
+        # 2. Send via Teams (if configured)
+        if self.teams.webhook_url:
+            teams_sent = self.teams.send_notification(subject, slack_text, teams_color)
+            if teams_sent:
+                sent_any = True
+
+        # 3. Send via Email (if assignee has email)
+        if email:
+            email_sent = await asyncio.to_thread(
                 self.email_service.send_email,
                 [email],
                 subject,
                 body_text
             )
+            if email_sent:
+                sent_any = True
+                
+        return sent_any
 
     def generate_report_markdown_from_model(self, report: FollowUpReport) -> str:
         """
