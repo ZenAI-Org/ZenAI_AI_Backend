@@ -2,12 +2,12 @@
 
 An intelligent, multi-modal AI project management system. It analyzes meetings (audio/text), extracts tasks, and orchestrates workflows across Notion, Jira, Slack, and Microsoft Teams.
 
-Supported by OpenAI (GPT-4), Groq (Llama 3.3), and Google Gemini (1.5 Pro).
+Supported by **Google Gemini (1.5 Pro)** (Default), OpenAI, and Groq.
 
 ## 🚀 Features
 
 - **Multi-Modal Meeting Analysis**: 
-  - **Audio**: Transcribes and analyzes audio using **OpenAI Whisper** or **Gemini 1.5 Pro** (for long-context native audio).
+  - **Audio**: Transcribes and analyzes audio using **Gemini 1.5 Pro** (Native Multi-modal) or OpenAI Whisper.
   - **Text**: Extracts insights from meeting transcripts.
 - **Intelligent Task Extraction**: Automatically identifies Action Items, Decisions, Risks, and Blockers.
 - **Cross-Platform Integration**: 
@@ -19,7 +19,7 @@ Supported by OpenAI (GPT-4), Groq (Llama 3.3), and Google Gemini (1.5 Pro).
   - Monitors task inactivity (stalled tasks).
   - Context-aware nudges (e.g., "Are you blocked?" vs "Update reminder").
   - Auto-escalates blockers to Jira.
-- **Flexible AI Backend**: Switch between **OpenAI**, **Groq** (fastest), or **Gemini** (largest context) via simple config.
+- **Flexible AI Backend**: Defaulting to **Gemini 1.5 Pro** for massive context window and multi-modal capabilities. Compatible with OpenAI and Groq.
 - **Real-time & Docker**: WebSocket updates and containerized deployment.
 
 ## 🛠️ Prerequisites
@@ -46,11 +46,13 @@ cp .env_example .env
 **Key Configuration Options (`.env`):**
 ```ini
 # --- AI Providers ---
-# Choose your brain: openai, groq, or gemini
-LLM_PROVIDER=openai 
+# Primary Brain
+LLM_PROVIDER=gemini 
+GOOGLE_API_KEY=AI...
+
+# Fallbacks (Optional)
 OPENAI_API_KEY=sk-...
 GROQ_API_KEY=gsk_...
-GOOGLE_API_KEY=...
 
 # --- Integrations ---
 # Notion (Required for Task DB)

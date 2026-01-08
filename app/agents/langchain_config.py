@@ -23,10 +23,10 @@ class LangChainConfig:
     """Configuration for LangChain framework."""
     
     # Default model configuration
-    DEFAULT_PROVIDER = "openai"  # "openai", "groq", or "gemini"
+    DEFAULT_PROVIDER = "gemini"  # "openai", "groq", or "gemini"
     DEFAULT_MODEL_OPENAI = "gpt-4"
     DEFAULT_MODEL_GROQ = "llama-3.3-70b-versatile"
-    DEFAULT_MODEL_GEMINI = "gemini-1.5-pro-latest"
+    DEFAULT_MODEL_GEMINI = "gemini-1.5-pro"
     DEFAULT_TEMPERATURE = 0.1
     DEFAULT_MAX_TOKENS = 2048
     DEFAULT_TIMEOUT = 300

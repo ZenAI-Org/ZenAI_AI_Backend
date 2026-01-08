@@ -29,18 +29,16 @@ class AudioProcessor:
             content = await upload_file.read() 
             await out_file.write(content) 
         
-    def transcribe_audio(self, audio_file_path: str, use_gemini: bool = False) -> str: 
-        # Transcribe audio file using OpenAI's whisper model OR Gemini
+    def transcribe_audio(self, audio_file_path: str, use_gemini: bool = True) -> str: 
+        # Transcribe audio file using Gemini (Default) or OpenAI's whisper model
         
-        # 1. Try Gemini if requested or if OpenAI is missing but Gemini is present
+        # 1. Try Gemini if available (Primary)
         if (use_gemini or not self.client) and self.gemini_available:
             try:
                 print(f"[INFO] Transcribing with Gemini 1.5 Pro: {audio_file_path}")
-                model = genai.GenerativeModel("gemini-1.5-pro-latest")
+                model = genai.GenerativeModel("gemini-1.5-pro")
                 
                 # Upload the file to Gemini (File API)
-                # Note: For very large files, this might need async upload, 
-                # but for typical clips, standard upload is okay.
                 uploaded_file = genai.upload_file(audio_file_path)
                 
                 # Generate content (prompt + audio)
@@ -56,7 +54,10 @@ class AudioProcessor:
                 print(f"[ERROR] Gemini transcription failed: {e}")
                 # Fallback to OpenAI if configured
                 if not self.client:
-                    raise HTTPException(status_code=500, detail=f"Gemini transcription failed: {str(e)}")
+                    raise HTTPException(status_code=500, detail=f"Gemini transcription failed and OpenAI not available: {str(e)}")
+        
+        # 2. Use OpenAI Whisper
+        print(f"[INFO] Falling back to OpenAI Whisper")
         
         # 2. Use OpenAI Whisper
         if not self.client:
