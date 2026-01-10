@@ -727,6 +727,10 @@ async def health_check(orchestrator=Depends(get_orchestration_engine_dep)):
             "error_metrics": metrics.get_metrics_summary(),
         }
     
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
+
 
 # ============================================================================
 # Follow-up Agent Endpoints
