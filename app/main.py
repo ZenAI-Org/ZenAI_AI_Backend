@@ -8,13 +8,13 @@ from typing import List, Optional
 import json
 import tempfile
 from app.api.routes import router as ai_workflows_router
-# from app.api.routes_test import router as ai_workflows_router
 from app.integrations.notion_integration import NotionIntegration
 from app.services.email_service import EmailService
 from app.audio_processor import AudioProcessor
 from langchain.schema import HumanMessage
+from app.core.logger import get_logger
 
-# Request model
+# Request models
 class MeetingRequest(BaseModel):
     meeting_text: str
 
@@ -25,11 +25,12 @@ class TaskItem(BaseModel):
     priority: str  # High, Medium, Low
     due_date: Optional[str] = None
 
-
 # Load environment variables
 load_dotenv()
 
 app = FastAPI(title="AI Project Manager Agent", version="1.0.0", debug=True)
+
+logger = get_logger(__name__)
 
 # Initialize Google Gemini
 try:
@@ -81,6 +82,52 @@ except Exception as e:
     print(f"[ERROR] Email service initialization failed: {e}") 
     email_service = None
 
+# Initialize Database Connection for advanced features
+db_conn = None
+try:
+    from app.core.pgvector_setup import PgvectorSetup
+    pg_setup = PgvectorSetup()
+    db_conn = pg_setup.get_connection()
+    print("[INFO] Database connection established")
+except Exception as e:
+    print(f"[ERROR] Database connection failed: {e}")
+    db_conn = None
+
+# Initialize Repetition Detector
+try:
+    from app.services.repetition_detector import RepetitionDetector
+    if db_conn and notion_integration:
+        repetition_detector = RepetitionDetector(db_conn, notion_integration)
+        print("[INFO] Repetition detector initialized")
+    else:
+        repetition_detector = None
+        print("[WARNING] Repetition detector disabled (requires DB and Notion)")
+except Exception as e:
+    print(f"[ERROR] Repetition detector initialization failed: {e}")
+    repetition_detector = None
+
+# Initialize Security Manager
+try:
+    from app.core.security import SecurityManager
+    if db_conn:
+        security_manager = SecurityManager(db_conn)
+        print("[INFO] Security Manager initialized")
+    else:
+        security_manager = None
+        print("[WARNING] Security Manager disabled (requires DB)")
+except Exception as e:
+    print(f"[ERROR] Security Manager initialization failed: {e}")
+    security_manager = None
+
+# Initialize Scheduler Service
+try:
+    from app.core.scheduler import SchedulerService
+    scheduler_service = SchedulerService()
+    print("[INFO] Scheduler service initialized")
+except Exception as e:
+    print(f"[ERROR] Scheduler initialization failed: {e}")
+    scheduler_service = None
+
 # Add middleware
 app.add_middleware(
     CORSMiddleware,
@@ -131,6 +178,20 @@ if SOCKETIO_AVAILABLE:
     # IMPORTANT: This must be done AFTER adding all middleware to FastAPI app
     app = socketio.ASGIApp(sio, app)
 
+@app.on_event("startup")
+async def startup_event():
+    """Start background services"""
+    if scheduler_service:
+        scheduler_service.start()
+        logger.info("Scheduler service started")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop background services"""
+    if scheduler_service:
+        scheduler_service.shutdown()
+        logger.info("Scheduler service stopped")
+
 @app.get("/")
 async def root():
     return {
@@ -138,7 +199,19 @@ async def root():
         "gemini_status": "connected" if llm else "failed",
         "audio_status": "enabled" if audio_processor else "disabled",
         "notion_status": "connected" if notion_integration else "disabled",
-        "email_status" : "enabled" if email_service else "disabled"
+        "email_status": "enabled" if email_service else "disabled",
+        "scheduler_status": "running" if scheduler_service and hasattr(scheduler_service, 'is_running') and scheduler_service.is_running else "stopped",
+        "security_status": "enabled" if security_manager else "disabled",
+        "repetition_detector_status": "enabled" if repetition_detector else "disabled"
+    }
+
+@app.get("/api/v1/ai/healthz")
+async def health_check():
+    """Health check endpoint for production monitoring"""
+    return {
+        "status": "ok",
+        "service": "ai-engine",
+        "version": "1.0.0"
     }
 
 @app.post("/analyze-meeting")
