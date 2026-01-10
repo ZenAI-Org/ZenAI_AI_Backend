@@ -260,6 +260,7 @@ class EmbeddingStore:
                     content_type,
                     content_id,
                     metadata,
+                    created_at,
                     1 - (embedding <=> %s::vector) as similarity
                 FROM project_embeddings
                 WHERE project_id = %s AND content_type = %s
@@ -285,6 +286,7 @@ class EmbeddingStore:
                     content_type,
                     content_id,
                     metadata,
+                    created_at,
                     1 - (embedding <=> %s::vector) as similarity
                 FROM project_embeddings
                 WHERE project_id = %s
@@ -314,7 +316,8 @@ class EmbeddingStore:
                     "content_type": row[2],
                     "content_id": row[3],
                     "metadata": row[4],
-                    "similarity": float(row[5])
+                    "created_at": row[5].isoformat() if row[5] else None,
+                    "similarity": float(row[6])
                 })
             
             logger.debug(f"Semantic search found {len(formatted_results)} results")

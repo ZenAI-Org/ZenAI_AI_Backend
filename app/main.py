@@ -29,6 +29,14 @@ except ImportError:
     logger_init = get_logger(__name__)
     logger_init.warning("Socket.io not available, real-time updates disabled")
 
+# Scheduler import
+try:
+    from app.core.scheduler import SchedulerService
+    scheduler_service = SchedulerService()
+except Exception as e:
+    print(f"[ERROR] Scheduler initialization failed: {e}")
+    scheduler_service = None
+
 app = FastAPI(title="AI Project Manager Agent", version="1.0.0")
 
 # Initialize Socket.io if available
@@ -164,6 +172,42 @@ except Exception as e:
     print(f"[ERROR] Email service initialization failed: {e}") 
     email_service = None 
 
+# Initialize Repetition Detector
+try:
+    from app.services.repetition_detector import RepetitionDetector
+    # Need db connection. We can access it via notion_integration implicitly or created explicitly
+    # For now, let's assume we can obtain it or pass existing dependencies.
+    # Actually, main.py doesn't strictly hold the db connection object globally exposed easily.
+    # However, PgvectorSetup does. 
+    from app.core.pgvector_setup import PgvectorSetup
+    pg_setup = PgvectorSetup()
+    db_conn = pg_setup.get_connection()
+    
+    repetition_detector = RepetitionDetector(db_conn, notion_integration)
+    print("[INFO] Repetition detector initialized")
+except Exception as e:
+    print(f"[ERROR] Repetition detector initialization failed: {e}")
+    repetition_detector = None
+    db_conn = None
+
+# Initialize Security Manager
+try:
+    from app.core.security import SecurityManager
+    # Reuse db_conn if available, otherwise try to create a new one
+    if not db_conn:
+        try:
+            from app.core.pgvector_setup import PgvectorSetup
+            pg_setup = PgvectorSetup()
+            db_conn = pg_setup.get_connection()
+        except:
+            db_conn = None
+            
+    security_manager = SecurityManager(db_conn)
+    print("[INFO] Security Manager initialized")
+except Exception as e:
+    print(f"[ERROR] Security Manager initialization failed: {e}")
+    security_manager = None
+
 @app.get("/")
 async def root():
     return {
@@ -171,8 +215,23 @@ async def root():
         "groq_status": "connected" if llm else "failed",
         "audio_status": "enabled" if audio_processor else "disabled",
         "notion_status": "connected" if notion_integration else "disabled",
-        "email_status" : "enabled" if email_service else "disabled"
+        "email_status" : "enabled" if email_service else "disabled",
+        "scheduler_status": "running" if scheduler_service and scheduler_service.is_running else "stopped"
     }
+
+@app.on_event("startup")
+async def startup_event():
+    """Start background services"""
+    if scheduler_service:
+        scheduler_service.start()
+        logger.info("Scheduler service started")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop background services"""
+    if scheduler_service:
+        scheduler_service.shutdown()
+        logger.info("Scheduler service stopped")
 
 @app.get("/api/v1/ai/healthz")
 async def health_check():
@@ -225,6 +284,7 @@ async def analyze_meeting_text(request: MeetingRequest):
     2. Action items (with assignee if mentioned, priority, due date if mentioned)
     3. Risks and blockers identified
     4. Brief meeting summary
+    5. List of 3-5 Key Topics discussed (short phrases like "API Latency", "Login Page Design")
     
     Meeting transcript:
     {meeting_text}
@@ -242,14 +302,29 @@ async def analyze_meeting_text(request: MeetingRequest):
             }}
         ],
         "risks_and_blockers": ["risk 1", "risk 2"],
-        "meeting_summary": "brief summary of the meeting"
+        "meeting_summary": "brief summary of the meeting",
+        "key_topics": ["Topic 1", "Topic 2"]
     }}
     
     Only return valid JSON, no additional text.
     """
     
     try:
-        print(f"[INFO] Analyzing meeting text: {meeting_text[:100]}...")
+        # Security Check
+        project_id = "default-project" # Placeholder - normally from auth/request
+        privacy_settings = {"sanitize_logs": False, "do_not_train": False}
+        
+        if security_manager:
+            privacy_settings = security_manager.check_privacy_settings(project_id)
+            if privacy_settings["do_not_train"]:
+                print(f"[INFO] Privacy Mode Enabled for Project {project_id}: 'Do Not Train' active.")
+        
+        # Log input (sanitized if needed)
+        log_content = meeting_text[:100]
+        if privacy_settings["sanitize_logs"]:
+            log_content = "[REDACTED]"
+            
+        print(f"[INFO] Analyzing meeting text: {log_content}...")
         
         # Call Groq API
         message = HumanMessage(content=prompt)
@@ -266,6 +341,21 @@ async def analyze_meeting_text(request: MeetingRequest):
             
         # Parse the JSON response
         analysis = json.loads(content)
+        
+        # Repetition Detection Logic
+        if repetition_detector and "key_topics" in analysis:
+            project_id = "default-project" # Placeholder
+            topics = analysis["key_topics"]
+            
+            # Detect
+            recurring = repetition_detector.detect_recurring_topics(project_id, topics)
+            analysis["recurring_issues"] = recurring
+            
+            # Store (async ideally, but sync for now)
+            # Use a dummy meeting ID or generate one
+            import uuid
+            meeting_id = str(uuid.uuid4())
+            repetition_detector.store_topics(project_id, topics, meeting_id)
         
         return analysis
     
@@ -403,6 +493,7 @@ async def analyze_and_sync_to_notion(request: MeetingRequest):
     2. Action items (with assignee if mentioned, priority, due date if mentioned)
     3. Risks and blockers identified
     4. Brief meeting summary
+    5. List of 3-5 Key Topics discussed (short phrases like "API Latency", "Login Page Design")
     
     Meeting transcript:
     {meeting_text}
@@ -420,7 +511,8 @@ async def analyze_and_sync_to_notion(request: MeetingRequest):
             }}
         ],
         "risks_and_blockers": ["risk 1", "risk 2"],
-        "meeting_summary": "brief summary of the meeting"
+        "meeting_summary": "brief summary of the meeting",
+        "key_topics": ["Topic 1", "Topic 2"]
     }}
     
     Only return valid JSON, no additional text.

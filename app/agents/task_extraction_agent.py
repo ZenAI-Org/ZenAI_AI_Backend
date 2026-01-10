@@ -54,6 +54,21 @@ class ExtractedTask(BaseModel):
         default=None,
         description="Description of blocker if task is blocked"
     )
+    assignment_type: str = Field(
+        default="unassigned",
+        description="Type of assignment: explicit, inferred, or unassigned",
+        pattern="^(explicit|inferred|unassigned)$"
+    )
+    confidence_score: float = Field(
+        default=1.0,
+        description="Confidence score of the assignment (0.0 to 1.0)",
+        ge=0.0,
+        le=1.0
+    )
+    assignment_reasoning: Optional[str] = Field(
+        default=None,
+        description="Reasoning key for why this person was assigned (especially for inferred)"
+    )
     
     class Config:
         """Pydantic config."""
@@ -130,6 +145,9 @@ Please extract all actionable tasks and provide them in the following JSON forma
             "description": "Detailed description of what needs to be done",
             "priority": "low|medium|high",
             "assignee_name": "Person name if mentioned, or null",
+            "assignment_type": "explicit|inferred|unassigned",
+            "confidence_score": 0.0 to 1.0,
+            "assignment_reasoning": "Reasoning for assignment, especially if inferred",
             "due_date": "YYYY-MM-DD format if mentioned, or null",
             "blocked": false,
             "blocker_description": null
@@ -141,7 +159,12 @@ Please extract all actionable tasks and provide them in the following JSON forma
 
 Guidelines:
 - Extract ONLY actionable tasks (not discussions or decisions without action)
-- Identify specific people mentioned as assignees
+- Identify specific people mentioned as assignees.
+- **Assignment Logic**:
+    - **Explicit**: User clearly says "I will do this" or "Bob, you handle this".
+    - **Inferred**: Context implies responsibility (e.g., "Bob is the frontend lead" -> Assign frontend task to Bob). Provide reasoning.
+    - **Unassigned**: No specific person found.
+- **Confidence**: Provide a score (0.0-1.0) for the assignment. Low confidence (<0.7) should be flagged.
 - Infer priority from context (urgent/critical = high, routine = low, default = medium)
 - Flag tasks that are blocked by dependencies or external factors
 - Include due dates if mentioned or implied
@@ -346,6 +369,13 @@ Guidelines:
                     # Ensure boolean fields
                     if "blocked" not in task_data:
                         task_data["blocked"] = False
+                    
+                    # Validate new ownership fields
+                    if "assignment_type" not in task_data or task_data["assignment_type"] not in ["explicit", "inferred", "unassigned"]:
+                         task_data["assignment_type"] = "unassigned"
+                    
+                    if "confidence_score" not in task_data:
+                        task_data["confidence_score"] = 1.0
                     
                     # Create ExtractedTask to validate
                     task = ExtractedTask(**task_data)

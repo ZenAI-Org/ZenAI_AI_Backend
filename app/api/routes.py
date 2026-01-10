@@ -727,6 +727,52 @@ async def health_check(orchestrator=Depends(get_orchestration_engine_dep)):
             "error_metrics": metrics.get_metrics_summary(),
         }
     
+
+# ============================================================================
+# Follow-up Agent Endpoints
+# ============================================================================
+
+@router.post(
+    "/agents/followup/run",
+    summary="Trigger Follow-up Agent run",
+    description="Manually trigger the Follow-up Agent to check for inactive tasks and send nudges",
+)
+async def run_followup_agent(
+    project_id: str = Query(..., description="Project ID to check"),
+    orchestrator=Depends(get_orchestration_engine_dep),
+):
+    """
+    Trigger Follow-up Agent run.
+
+    Args:
+        project_id: Project ID
+        orchestrator: AIOrchestrationEngine instance
+
+    Returns:
+        Result of the agent run
+    """
+    try:
+        logger.info(f"Triggering Follow-up Agent for project_id={project_id}")
+        
+        # In a real microservices architecture, this might be handled via the orchestrator/queue
+        # For this implementation, we instantiate and run directly or offload to background task
+        # Depending on how 'orchestrator' is implemented. 
+        # Assuming we want to run it via the new class we created:
+        
+        from app.agents.followup_agent import FollowUpAgent
+        agent = FollowUpAgent() 
+        
+        # Execute the agent
+        result = await agent.execute(project_id=project_id)
+        
+        if result.status == "error":
+             raise HTTPException(status_code=500, detail=result.error)
+             
+        return result.data
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Health check failed: {str(e)}")
-        raise HTTPException(status_code=503, detail=f"Service unavailable: {str(e)}")
+        logger.error(f"Error running Follow-up Agent: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Follow-up Agent failed: {str(e)}")
+

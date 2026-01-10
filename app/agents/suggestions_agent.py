@@ -47,6 +47,16 @@ class Suggestion(BaseModel):
         ge=1,
         le=10
     )
+    reasoning: Optional[str] = Field(
+        default=None,
+        description="Explanation for why this suggestion was made"
+    )
+    confidence: float = Field(
+        default=0.8,
+        description="Confidence score (0.0 to 1.0)",
+        ge=0.0,
+        le=1.0
+    )
     generated_at: Optional[str] = Field(
         default=None,
         description="Timestamp when suggestion was generated"
@@ -135,7 +145,9 @@ Generate suggestions in JSON format:
             "title": "Suggestion title",
             "description": "Detailed description of the suggestion",
             "action_url": "URL if applicable or null",
-            "priority": 8
+            "priority": 8,
+            "reasoning": "Because this task is blocking 3 other items and the deadline is in 2 days.",
+            "confidence": 0.9
         }}
     ]
 }}
@@ -145,6 +157,10 @@ Focus on:
 - Tasks that are blocking other work
 - Tasks approaching deadlines
 - Tasks with unclear ownership
+
+IMPORTANT: For each suggestion, you MUST include:
+- "reasoning": A "Because..." explanation for why this suggestion is important.
+- "confidence": A float (0.0-1.0) indicating how certain you are about this suggestion.
 
 Ensure suggestions are specific and actionable.""",
             input_variables=["project_data"],
@@ -165,7 +181,9 @@ Generate suggestions in JSON format:
             "title": "Insight title",
             "description": "Detailed insight description",
             "action_url": "URL if applicable or null",
-            "priority": 7
+            "priority": 7,
+            "reasoning": "Because the data shows a 20% drop in velocity this week.",
+            "confidence": 0.85
         }}
     ]
 }}
@@ -175,6 +193,10 @@ Focus on:
 - Team capacity and workload distribution
 - Risk factors and dependencies
 - Opportunities for improvement
+
+IMPORTANT: For each insight, you MUST include:
+- "reasoning": A "Because..." explanation based on data.
+- "confidence": A float (0.0-1.0) indicating how certain you are.
 
 Ensure insights are data-driven and actionable.""",
             input_variables=["project_data"],
@@ -195,7 +217,9 @@ Generate suggestions in JSON format:
             "title": "Blocker title",
             "description": "Detailed description of the blocker and impact",
             "action_url": "URL if applicable or null",
-            "priority": 9
+            "priority": 9,
+            "reasoning": "Because this dependency has been stalled for 5 days and blocks the release.",
+            "confidence": 0.95
         }}
     ]
 }}
@@ -206,6 +230,10 @@ Focus on:
 - Technical risks
 - Communication gaps
 - Overdue items
+
+IMPORTANT: For each blocker, you MUST include:
+- "reasoning": A "Because..." explanation of the impact.
+- "confidence": A float (0.0-1.0) indicating how certain you are.
 
 Ensure blockers are clearly identified with suggested resolutions.""",
             input_variables=["project_data"],
@@ -226,7 +254,9 @@ Generate suggestions in JSON format:
             "title": "Opportunity title",
             "description": "Detailed description of the opportunity and potential impact",
             "action_url": "URL if applicable or null",
-            "priority": 6
+            "priority": 6,
+            "reasoning": "Because automating this process could save 3 hours per week.",
+            "confidence": 0.8
         }}
     ]
 }}
@@ -237,6 +267,10 @@ Focus on:
 - Team collaboration opportunities
 - Knowledge sharing possibilities
 - Automation opportunities
+
+IMPORTANT: For each opportunity, you MUST include:
+- "reasoning": A "Because..." explanation of the potential impact.
+- "confidence": A float (0.0-1.0) indicating how certain you are.
 
 Ensure opportunities are realistic and achievable.""",
             input_variables=["project_data"],
@@ -468,6 +502,8 @@ Ensure opportunities are realistic and achievable.""",
                         description=suggestion_data.get("description", ""),
                         action_url=suggestion_data.get("action_url"),
                         priority=suggestion_data.get("priority", 5),
+                        reasoning=suggestion_data.get("reasoning"),
+                        confidence=suggestion_data.get("confidence", 0.8),
                         generated_at=datetime.now().isoformat()
                     )
                     validated_suggestions.append(suggestion)
