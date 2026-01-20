@@ -41,4 +41,3 @@ docker-compose.override.yml
 # Project specific
 .kiro/
 
-.github/
